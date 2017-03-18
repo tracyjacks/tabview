@@ -17,12 +17,15 @@ import os
 import re
 import string
 import sys
+import warnings
 from collections import Counter
 from curses.textpad import Textbox
 from operator import itemgetter
 from subprocess import Popen, PIPE
 from textwrap import wrap
 import unicodedata
+
+warnings.filterwarnings('ignore', '.*Unicode.*')
 
 
 if sys.version_info.major < 3:
@@ -92,7 +95,9 @@ class Viewer:
         os.unsetenv('LINES')
         os.unsetenv('COLUMNS')
         self.scr = args[0]
-        self.data = [[str(j) for j in i] for i in args[1]]
+        self.data_loader = args[1]
+        self.data_loader.get_rows()
+        self.data = self.data_loader.csv_data
         self.info = kwargs.get('info')
         self.header_offset_orig = 3
         self.header = self.data[0]
@@ -127,6 +132,8 @@ class Viewer:
         self.modifier = str()
         self.define_keys()
         self.resize()
+        self.data_loader.get_rows(self.max_y)
+
         self.display()
         # Handle goto initial position (either (y,x), [y] or y)
         try:
@@ -213,6 +220,7 @@ class Viewer:
         self.goto_x(xp + 1 + m)
 
     def page_down(self):
+        # TODO get new rows
         m = self.consume_modifier()
         row_shift = (self.max_y - self.header_offset) * m
         end = len(self.data) - 1
@@ -272,6 +280,8 @@ class Viewer:
         self.goto_y(1)
 
     def goto_y(self, y):
+        if y > len(self.data):
+            self.data_loader.get_rows(y)
         y = max(min(len(self.data), y), 1)
         if self.win_y < y <= self.win_y + \
                 (self.max_y - self.header_offset - self._search_win_open):
@@ -1115,9 +1125,6 @@ def csv_sniff(data, enc):
         csv.dialect.delimiter
 
     """
-    data = data.decode(enc)
-    dialect = csv.Sniffer().sniff(data)
-    return dialect.delimiter
 
 
 def fix_newlines(data):
@@ -1135,39 +1142,59 @@ def fix_newlines(data):
     return data
 
 
-def process_data(data, enc=None, delim=None, quoting=None, quote_char=str('"')):
-    """Given a list of lists, check for the encoding, quoting and delimiter and
-    return a list of CSV rows (normalized to a single length)
+class DataLoader(object):
 
-    """
-    data = fix_newlines(data)
-    if data_list_or_file(data) == 'list':
-        # If data is from an object (list of lists) instead of a file
+    def __init__(self, buf, enc=None, delim=None,
+                 quoting=None, quotechar=None, page=False):
+        # TODO pad_data, fix_newline
+        self.enc = enc
+        self.csv_data = []
+
+        snippet = buf.read(2048)
+        buf.seek(0)
+        if self.enc is None:
+            self.enc = detect_encoding(snippet)
+        if delim is None:
+            dialect = csv.Sniffer().sniff(snippet.decode(self.enc))
+            delim = dialect.delimiter
+            buf.seek(0)
+        if quoting is not None:
+            quoting = getattr(csv, quoting)
+        else:
+            quoting = csv.QUOTE_MINIMAL
+
         if sys.version_info.major < 3:
-            data = py2_list_to_unicode(data)
-        return pad_data(data)
-    if enc is None:
-        enc = detect_encoding(data)
-    if delim is None:
-        delim = csv_sniff(data[0], enc)
-    if quoting is not None:
-        quoting = getattr(csv, quoting)
-    else:
-        quoting = csv.QUOTE_MINIMAL
-    csv_data = []
-    if sys.version_info.major < 3:
-        csv_obj = csv.reader(data, delimiter=delim.encode(enc),
-                             quoting=quoting, quotechar=quote_char.encode(enc))
-        for row in csv_obj:
-            row = [str(x, enc) for x in row]
-            csv_data.append(row)
-    else:
-        data = [i.decode(enc) for i in data]
-        csv_obj = csv.reader(data, delimiter=delim, quoting=quoting,
-                             quotechar=quote_char)
-        for row in csv_obj:
-            csv_data.append(row)
-    return pad_data(csv_data)
+            delim = delim.encode(self.enc)
+            quotechar = quotechar.encode(self.enc)
+
+        self.buf = buf
+        self.csv_obj = csv.reader(
+            iter(self.buf.readline, ''),
+            delimiter=delim,
+            quoting=quoting,
+            quotechar=quotechar
+        )
+        self.page = page
+        self.row_iter = self.iter_rows()
+        self.n_rows = 0
+
+    def iter_rows(self):
+        for row in self.csv_obj:
+            if sys.version_info.major < 3:
+                row = [str(x, self.enc) for x in row]
+            else:
+                row = [i.decode(self.enc) for i in row]
+            yield row
+
+    def get_rows(self, to_n=None):
+        if self.page and to_n is None:
+            to_n = self.n_rows + 1
+        while (not self.page) or (self.n_rows <= to_n):
+            try:
+                self.csv_data.append(self.row_iter.next())
+                self.n_rows += 1
+            except StopIteration:
+                break
 
 
 def py2_list_to_unicode(data):
@@ -1244,8 +1271,7 @@ def detect_encoding(data=None):
         enc_list.insert(0, code.lower())
     for c in enc_list:
         try:
-            for line in data:
-                line.decode(c)
+            data.decode(c)
         except (UnicodeDecodeError, UnicodeError):
             continue
         return c
@@ -1267,7 +1293,7 @@ def main(stdscr, *args, **kwargs):
 def view(data, enc=None, start_pos=(0, 0), column_width=20, column_gap=2,
          trunc_char='…', column_widths=None, search_str=None,
          double_width=False, delimiter=None, quoting=None, info=None,
-         quote_char=str('"')):
+         quote_char=str('"'), pager=False):
     """The curses.wrapper passes stdscr as the first argument to main +
     passes to main any other arguments passed to wrapper. Initializes
     and then puts screen back in a normal state after closing or
@@ -1315,17 +1341,17 @@ def view(data, enc=None, start_pos=(0, 0), column_width=20, column_gap=2,
         while True:
             try:
                 if isinstance(data, basestring):
-                    with open(data, 'rb') as fd:
-                        new_data = fd.readlines()
-                        if info == "":
-                            info = data
+                    new_data = DataLoader(
+                        open(data, 'rb'), enc,
+                        delimiter, quoting, quote_char, pager)
                 elif isinstance(data, (io.IOBase, file)):
-                    new_data = data.readlines()
+                    new_data = DataLoader(
+                        data, enc, delimiter, quoting, quote_char, pager)
                 else:
                     new_data = data
 
                 if new_data:
-                    buf = process_data(new_data, enc, delimiter, quoting, quote_char)
+                    buf = new_data
                 elif buf:
                     # cannot reload the file
                     pass
