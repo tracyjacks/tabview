@@ -26,6 +26,7 @@ from textwrap import wrap
 import unicodedata
 
 warnings.filterwarnings('ignore', '.*Unicode.*')
+PY2 = sys.version_info.major < 3
 
 
 if sys.version_info.major < 3:
@@ -1171,7 +1172,7 @@ class DataLoader(object):
             to_n = self.n_rows + 1
         while (not self.page) or (self.n_rows <= to_n):
             try:
-                new_row = self.row_iter.next()
+                new_row = next(self.row_iter)
                 new_row = self.pad_data(new_row)
                 self.csv_data.append(new_row)
                 self.n_rows += 1
@@ -1222,16 +1223,14 @@ class DataLoaderStream(DataLoader):
 
     def __init__(self, data, enc=None, delim=None,
                  quoting=None, quotechar=None, page=False):
-        # TODO pad_data, fix_newline
         super(DataLoaderStream, self).__init__(data, page)
         self.enc = enc
 
-        snippet = self.data.read(2048)
-        self.data.seek(0)
+        self.snippet = self.data.read(2048)
         if self.enc is None:
-            self.enc = detect_encoding(snippet)
+            self.enc = detect_encoding(self.snippet)
         if delim is None:
-            dialect = csv.Sniffer().sniff(snippet.decode(self.enc))
+            dialect = csv.Sniffer().sniff(self.snippet.decode(self.enc))
             delim = dialect.delimiter
         if quoting is not None:
             quoting = getattr(csv, quoting)
@@ -1243,19 +1242,31 @@ class DataLoaderStream(DataLoader):
             quotechar = quotechar.encode(self.enc)
 
         self.csv_obj = csv.reader(
-            iter(self.data.readline, ''),
+            self.file_iter(),
             delimiter=delim,
             quoting=quoting,
             quotechar=quotechar
         )
         self.row_iter = self.iter_rows()
 
+    def file_iter(self):
+        for line in self.snippet.splitlines(True):
+            for subline in line.splitlines():
+                if PY2:
+                    yield subline + '\n'.encode(self.enc)
+                else:
+                    yield subline.decode(self.enc) + '\n'
+        for line in self.data.readlines():
+            for subline in line.splitlines():
+                if PY2:
+                    yield subline + '\n'.encode(self.enc)
+                else:
+                    yield subline.decode(self.enc) + '\n'
+
     def iter_rows(self):
         for row in self.csv_obj:
             if sys.version_info.major < 3:
                 row = [str(x, self.enc) for x in row]
-            else:
-                row = [i.decode(self.enc) for i in row]
             yield row
 
 
