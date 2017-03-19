@@ -677,8 +677,8 @@ class Viewer:
                      'G':   self.goto_row,
                      '|':   self.goto_col,
                      '\n':  self.show_cell,
-                     '/':   self.search,
-                     'n':   self.search_results,
+                     '/':   self.search,  # TODO
+                     'n':   self.search_results,  # TODO
                      'p':   self.search_results_prev,
                      't':   self.toggle_header,
                      '-':   self.column_gap_down,
@@ -692,10 +692,10 @@ class Viewer:
                      's':   self.sort_by_column,
                      'S':   self.sort_by_column_reverse,
                      'y':   self.yank_cell,
-                     'r':   self.reload,
+                     'r':   self.reload,  # FIXME
                      'c':   self.toggle_column_width,
                      'C':   self.set_current_column_width,
-                     ']':   self.skip_to_row_change,
+                     ']':   self.skip_to_row_change,  # TODO
                      '[':   self.skip_to_row_change_reverse,
                      '}':   self.skip_to_col_change,
                      '{':   self.skip_to_col_change_reverse,
@@ -1257,18 +1257,28 @@ class DataLoaderStream(DataLoader):
         self.row_iter = self.iter_rows()
 
     def file_iter(self):
+        def format_line(line):
+            if not PY2:
+                line = line.decode(self.enc)
+            return line
+
+        # first iterate over the already read snippet,
+        next_line = None
         for line in self.snippet.splitlines(True):
             for subline in line.splitlines():
-                if PY2:
-                    yield subline + '\n'.encode(self.enc)
-                else:
-                    yield subline.decode(self.enc) + '\n'
+                if next_line is not None:
+                    yield format_line(next_line)
+                next_line = subline
+
+        # combine the last line from snippet with next line
+        line = next_line + self.data.readline()
+        for subline in line.splitlines():
+            yield format_line(subline)
+
         for line in self.data.readlines():
             for subline in line.splitlines():
-                if PY2:
-                    yield subline + '\n'.encode(self.enc)
-                else:
-                    yield subline.decode(self.enc) + '\n'
+                yield format_line(subline)
+
 
     def iter_rows(self):
         for row in self.csv_obj:
