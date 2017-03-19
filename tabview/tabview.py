@@ -129,6 +129,7 @@ class Viewer:
         self.define_keys()
         self.resize()
         self.data_loader.get_rows(self.max_y)
+        self.check_layout()
 
         self.display()
         # Handle goto initial position (either (y,x), [y] or y)
@@ -213,9 +214,12 @@ class Viewer:
         self.goto_x(xp + 1 + m)
 
     def page_down(self):
-        # TODO get new rows
         m = self.consume_modifier()
         row_shift = (self.max_y - self.header_offset) * m
+        max_row = (self.win_y + row_shift + self.max_y - self.header_offset)
+        self.data_loader.get_rows(max_row)
+        self.check_layout()
+
         end = len(self.data) - 1
         if self.win_y <= end - row_shift:
             new_win_y = self.win_y + row_shift
@@ -224,6 +228,13 @@ class Viewer:
             self.win_y = new_win_y
         else:
             self.y = end - self.win_y
+
+    def check_layout(self):
+        if self.data_loader.layout_invalidated:
+            self._init_column_widths(
+                self.column_width_mode, self.column_width)
+            self.recalculate_layout()
+            self.data_loader.layout_invalidated = False
 
     def page_up(self):
         m = self.consume_modifier()
@@ -275,11 +286,7 @@ class Viewer:
     def goto_y(self, y):
         if y > len(self.data):
             self.data_loader.get_rows(y)
-            if self.data_loader.layout_invalidated:
-                self._init_column_widths(
-                    self.column_width_mode, self.column_width)
-                self.recalculate_layout()
-                self.data_loader.layout_invalidated = False
+            self.check_layout()
         y = max(min(len(self.data), y), 1)
         if self.win_y < y <= self.win_y + \
                 (self.max_y - self.header_offset - self._search_win_open):
