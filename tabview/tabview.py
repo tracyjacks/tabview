@@ -29,7 +29,7 @@ warnings.filterwarnings('ignore', '.*Unicode.*')
 PY2 = sys.version_info.major < 3
 
 
-if sys.version_info.major < 3:
+if PY2:
     # Python 2.7 shim
     str = unicode
 
@@ -635,7 +635,7 @@ class Viewer:
         yp = self.y + self.win_y
         xp = self.x + self.win_x
         s = self.data[yp][xp]
-        if sys.version_info.major < 3:
+        if PY2:
             s = s.encode(sys.stdout.encoding or 'utf-8')
         # Bail out if not running in X
         try:
@@ -1131,7 +1131,7 @@ def fix_newlines(data):
     without messing up Unicode support.
 
     """
-    if sys.version_info.major < 3:
+    if PY2:
         if len(data) == 1 and '\r' in data[0]:
             data = data[0].split('\r')
     else:
@@ -1153,7 +1153,7 @@ class DataLoader(object):
 
     def iter_rows(self):
         enc = detect_encoding()
-        if sys.version_info.major < 3:
+        if PY2:
             for row in self.data:
                 r = []
                 for x in row:
@@ -1237,7 +1237,7 @@ class DataLoaderStream(DataLoader):
         else:
             quoting = csv.QUOTE_MINIMAL
 
-        if sys.version_info.major < 3:
+        if PY2:
             delim = delim.encode(self.enc)
             quotechar = quotechar.encode(self.enc)
 
@@ -1265,7 +1265,7 @@ class DataLoaderStream(DataLoader):
 
     def iter_rows(self):
         for row in self.csv_obj:
-            if sys.version_info.major < 3:
+            if PY2:
                 row = [str(x, self.enc) for x in row]
             yield row
 
@@ -1356,7 +1356,7 @@ def view(data, enc=None, start_pos=(0, 0), column_width=20, column_gap=2,
               or "" if input was not from a file
 
     """
-    if sys.version_info.major < 3:
+    if PY2:
         lc_all = locale.getlocale(locale.LC_ALL)
         locale.setlocale(locale.LC_ALL, '')
     else:
