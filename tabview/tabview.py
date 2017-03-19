@@ -110,7 +110,7 @@ class Viewer:
             # If any of the header line cells are all digits, assume that the
             # first line is NOT a header
             self.header_offset = self.header_offset_orig - 1
-        self.num_data_columns = len(self.data[0])
+        self.num_data_columns = self.data_loader.max_cols
         self._init_double_width(kwargs.get('double_width'))
         self.column_width_mode = kwargs.get('column_width')
         self.column_gap = kwargs.get('column_gap')
@@ -1143,21 +1143,73 @@ def fix_newlines(data):
 
 
 class DataLoader(object):
+    def __init__(self, data, page=False):
+        self.data = data
+        self.csv_data = []
+        self.row_iter = self.iter_rows()
+        self.page = page
+        self.n_rows = 0
+        self.max_cols = None
 
-    def __init__(self, buf, enc=None, delim=None,
+    def iter_rows(self):
+        enc = detect_encoding()
+        if sys.version_info.major < 3:
+            for row in self.data:
+                r = []
+                for x in row:
+                    try:
+                        r.append(str(x, enc))
+                    except TypeError:
+                        # The 'enc' parameter fails with int values
+                        r.append(str(x))
+                yield r
+        else:
+            for row in self.data:
+                yield [str(i) for i in row]
+
+    def get_rows(self, to_n=None):
+        if self.page and to_n is None:
+            to_n = self.n_rows + 1
+        while (not self.page) or (self.n_rows <= to_n):
+            try:
+                new_row = self.row_iter.next()
+                new_row = self.pad_data(new_row)
+                self.csv_data.append(new_row)
+                self.n_rows += 1
+            except StopIteration:
+                break
+
+    def pad_data(self, new_row):
+        """Pad all rows to the length of the longest row."""
+
+        if self.max_cols is None:
+            self.max_cols = len(new_row)
+        new_max_cols = len(new_row)
+        n_diff_cols = new_max_cols - self.max_cols
+        if n_diff_cols < 0:
+            new_row =  new_row + [''] * abs(n_diff_cols)
+        elif n_diff_cols > 0:
+            self.csv_data = [
+                row + [''] * n_diff_cols for row in self.csv_data]
+            self.max_cols = new_max_cols
+        return new_row
+
+
+class DataLoaderStream(DataLoader):
+
+    def __init__(self, data, enc=None, delim=None,
                  quoting=None, quotechar=None, page=False):
         # TODO pad_data, fix_newline
+        super(DataLoaderStream, self).__init__(data, page)
         self.enc = enc
-        self.csv_data = []
 
-        snippet = buf.read(2048)
-        buf.seek(0)
+        snippet = self.data.read(2048)
+        self.data.seek(0)
         if self.enc is None:
             self.enc = detect_encoding(snippet)
         if delim is None:
             dialect = csv.Sniffer().sniff(snippet.decode(self.enc))
             delim = dialect.delimiter
-            buf.seek(0)
         if quoting is not None:
             quoting = getattr(csv, quoting)
         else:
@@ -1167,16 +1219,13 @@ class DataLoader(object):
             delim = delim.encode(self.enc)
             quotechar = quotechar.encode(self.enc)
 
-        self.buf = buf
         self.csv_obj = csv.reader(
-            iter(self.buf.readline, ''),
+            iter(self.data.readline, ''),
             delimiter=delim,
             quoting=quoting,
             quotechar=quotechar
         )
-        self.page = page
         self.row_iter = self.iter_rows()
-        self.n_rows = 0
 
     def iter_rows(self):
         for row in self.csv_obj:
@@ -1185,62 +1234,6 @@ class DataLoader(object):
             else:
                 row = [i.decode(self.enc) for i in row]
             yield row
-
-    def get_rows(self, to_n=None):
-        if self.page and to_n is None:
-            to_n = self.n_rows + 1
-        while (not self.page) or (self.n_rows <= to_n):
-            try:
-                self.csv_data.append(self.row_iter.next())
-                self.n_rows += 1
-            except StopIteration:
-                break
-
-
-def py2_list_to_unicode(data):
-    """Convert strings/int to unicode for python 2
-
-    """
-    enc = detect_encoding()
-    csv_data = []
-    for row in data:
-        r = []
-        for x in row:
-            try:
-                r.append(str(x, enc))
-            except TypeError:
-                # The 'enc' parameter fails with int values
-                r.append(str(x))
-        csv_data.append(r)
-    return csv_data
-
-
-def data_list_or_file(data):
-    """Determine if 'data' is a list of lists or list of strings/bytes
-
-    Python 3 - reading a file returns a list of byte strings
-    Python 2 - reading a file returns a list of strings
-    Both - list of lists is just a list
-
-    Returns: 'file' if data was from a file, 'list' if from a python list/tuple
-
-    """
-    f = isinstance(data[0], (basestring, bytes))
-    return 'file' if f is True else 'list'
-
-
-def pad_data(d):
-    """Pad data rows to the length of the longest row.
-
-        Args: d - list of lists
-
-    """
-    max_len = set((len(i) for i in d))
-    if len(max_len) == 1:
-        return d
-    else:
-        max_len = max(max_len)
-        return [i + [""] * (max_len - len(i)) for i in d]
 
 
 def readme():
@@ -1341,14 +1334,14 @@ def view(data, enc=None, start_pos=(0, 0), column_width=20, column_gap=2,
         while True:
             try:
                 if isinstance(data, basestring):
-                    new_data = DataLoader(
+                    new_data = DataLoaderStream(
                         open(data, 'rb'), enc,
                         delimiter, quoting, quote_char, pager)
                 elif isinstance(data, (io.IOBase, file)):
-                    new_data = DataLoader(
+                    new_data = DataLoaderStream(
                         data, enc, delimiter, quoting, quote_char, pager)
                 else:
-                    new_data = data
+                    new_data = DataLoader(data, pager)
 
                 if new_data:
                     buf = new_data
