@@ -96,21 +96,16 @@ class Viewer:
         os.unsetenv('COLUMNS')
         self.scr = args[0]
         self.data_loader = args[1]
-        self.data_loader.get_rows()
+        self.data_loader.get_rows(2)
         self.data = self.data_loader.csv_data
-        self.info = kwargs.get('info')
+        self.data_loader.set_header()
+        is_header = self.header = self.data_loader.header
         self.header_offset_orig = 3
-        self.header = self.data[0]
-        if len(self.data) > 1 and \
-                not any(self._is_num(cell) for cell in self.header):
-            del self.data[0]
+        if is_header:
             self.header_offset = self.header_offset_orig
         else:
-            # Don't make one line file a header row
-            # If any of the header line cells are all digits, assume that the
-            # first line is NOT a header
             self.header_offset = self.header_offset_orig - 1
-        self.num_data_columns = self.data_loader.max_cols
+        self.info = kwargs.get('info')
         self._init_double_width(kwargs.get('double_width'))
         self.column_width_mode = kwargs.get('column_width')
         self.column_gap = kwargs.get('column_gap')
@@ -145,12 +140,9 @@ class Viewer:
         except (IndexError, TypeError):
             pass
 
-    def _is_num(self, cell):
-        try:
-            float(cell)
-            return True
-        except ValueError:
-            return False
+    @property
+    def num_data_columns(self):
+        return self.data_loader.max_cols
 
     def _init_double_width(self, dw):
         """Initialize self._cell_len to determine if double width characters
@@ -282,6 +274,11 @@ class Viewer:
     def goto_y(self, y):
         if y > len(self.data):
             self.data_loader.get_rows(y)
+            if self.data_loader.layout_invalidated:
+                self._init_column_widths(
+                    self.column_width_mode, self.column_width)
+                self.recalculate_layout()
+                self.data_loader.layout_invalidated = False
         y = max(min(len(self.data), y), 1)
         if self.win_y < y <= self.win_y + \
                 (self.max_y - self.header_offset - self._search_win_open):
@@ -1150,6 +1147,8 @@ class DataLoader(object):
         self.page = page
         self.n_rows = 0
         self.max_cols = None
+        self.layout_invalidated = False
+        self.header = None
 
     def iter_rows(self):
         enc = detect_encoding()
@@ -1187,12 +1186,36 @@ class DataLoader(object):
         new_max_cols = len(new_row)
         n_diff_cols = new_max_cols - self.max_cols
         if n_diff_cols < 0:
-            new_row =  new_row + [''] * abs(n_diff_cols)
+            new_row = new_row + [''] * abs(n_diff_cols)
         elif n_diff_cols > 0:
-            self.csv_data = [
-                row + [''] * n_diff_cols for row in self.csv_data]
+            for row in self.csv_data:
+                row.extend([''] * n_diff_cols)
+            if self.header is not None:
+                self.header.extend([''] * n_diff_cols)
             self.max_cols = new_max_cols
+            self.layout_invalidated = True
         return new_row
+
+    def set_header(self):
+        if self.header is None:
+            self.header = self.csv_data[0]
+        if (
+                len(self.csv_data) > 1 and
+                not any(self._is_num(cell) for cell in self.header)
+        ):
+            del self.csv_data[0]
+        else:
+            # Don't make one line file a header row
+            # If any of the header line cells are all digits, assume that the
+            # first line is NOT a header
+            return False
+
+    def _is_num(self, cell):
+        try:
+            float(cell)
+            return True
+        except ValueError:
+            return False
 
 
 class DataLoaderStream(DataLoader):
