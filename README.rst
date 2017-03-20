@@ -143,7 +143,7 @@ Keybindings:
 **A**                        'Natural Sort' the table (descending)
 **r**                        Reload file/data. Also resets sort order
 **y**                        Yank cell contents to the clipboard
-                             (requires xsel or xclip)
+                             (requires xsel or xclip or pbpaste)
 **[num]c**                   Toggle variable column width mode (mode/max),
                              or set width to [num]
 **[num]C**                   Maximize current column, or set width to [num]
