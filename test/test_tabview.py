@@ -41,17 +41,16 @@ class TestTabviewUnits(unittest.TestCase):
         pass
 
     def data(self, fn):
-        with open(fn, 'rb') as f:
-            return f.readlines()
+        dl = t.DataLoaderStream(open(fn, 'rb'))
+        return dl
 
     def tabview_encoding(self, info):
         """Test that correct encoding is returned for encoded data.
 
         """
         fn, enc, _ = info
-        d = self.data(fn)
-        r = t.detect_encoding(d)
-        self.assertEqual(r, enc)
+        dl = self.data(fn)
+        self.assertEqual(dl.enc, enc)
 
     def test_tabview_encoding_utf8(self):
         """Test that correct encoding is returned for utf-8 encoded file.
@@ -72,7 +71,9 @@ class TestTabviewUnits(unittest.TestCase):
         """
         fn, _, sample_data = info
         code = 'utf-8'  # Per top line of file
-        res = t.process_data(self.data(fn))
+        data_loader = t.DataLoaderStream(open(fn, 'rb'))
+        data_loader.get_rows()
+        res = data_loader.csv_data
         # Check that process_file returns a list of lists
         self.assertEqual(type(res), list)
         self.assertEqual(type(res[0]), list)
@@ -115,27 +116,28 @@ class TestTabviewIntegration(unittest.TestCase):
                                   v.keys[key])
 
     def data(self, fn):
-        with open(fn, 'rb') as f:
-            return f.readlines()
+        data_loader = t.DataLoaderStream(open(fn, 'rb'))
+        data_loader.get_rows()
+        return data_loader
 
     def test_tabview_unicode(self):
-        curses.wrapper(self.main, t.process_data(self.data(data_1[0])),
+        curses.wrapper(self.main, self.data(data_1[0]),
                        start_pos=(5, 5), column_width='mode', column_gap=2,
                        column_widths=None, trunc_char='…', search_str=None)
 
     def test_tabview_latin1(self):
-        curses.wrapper(self.main, t.process_data(self.data(data_2[0])),
+        curses.wrapper(self.main, self.data(data_2[0]),
                        start_pos=5, column_width='max', column_gap=0,
                        column_widths=None, trunc_char='…', search_str='36')
 
     def test_tabview_list(self):
-        curses.wrapper(self.main, t.process_data(list_1),
+        curses.wrapper(self.main, t.DataLoader(list_1),
                        start_pos=0, column_width=5, column_gap=10,
                        column_widths=[4, 5, 1], trunc_char='>',
                        search_str=None)
 
     def test_tabview_windows_newlines(self):
-        curses.wrapper(self.main, t.process_data(self.data(win_newlines)),
+        curses.wrapper(self.main, self.data(win_newlines),
                        start_pos=(0, 1), column_width='mode', column_gap=5,
                        column_widths=None, trunc_char='…', search_str=None)
 
