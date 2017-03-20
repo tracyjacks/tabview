@@ -1120,18 +1120,6 @@ class TextBox:
         self.win.refresh()
 
 
-def csv_sniff(data, enc):
-    """Given a list, sniff the dialect of the data and return it.
-
-    Args:
-        data - list like ["col1,col2,col3"]
-        enc - python encoding value ('utf_8','latin-1','cp870', etc)
-    Returns:
-        csv.dialect.delimiter
-
-    """
-
-
 def fix_newlines(data):
     """If there are windows \r newlines in the input data, split the string on
     the \r characters. I can't figure another way to enable universal newlines
@@ -1228,16 +1216,20 @@ class DataLoader(object):
 
 class DataLoaderStream(DataLoader):
 
+    snippet_lines = 25
+
     def __init__(self, data, enc=None, delim=None,
-                 quoting=None, quotechar=None, page=False):
+                 quoting=None, quotechar='"', page=False):
         super(DataLoaderStream, self).__init__(data, page)
         self.enc = enc
 
-        self.snippet = self.data.read(2048)
+        self.snippet = [
+            self.data.readline() for i in range(self.snippet_lines)]
         if self.enc is None:
             self.enc = detect_encoding(self.snippet)
         if delim is None:
-            dialect = csv.Sniffer().sniff(self.snippet.decode(self.enc))
+            dialect = csv.Sniffer().sniff(
+                b''.join(self.snippet).decode(self.enc))
             delim = dialect.delimiter
         if quoting is not None:
             quoting = getattr(csv, quoting)
@@ -1263,17 +1255,9 @@ class DataLoaderStream(DataLoader):
             return line
 
         # first iterate over the already read snippet,
-        next_line = None
-        for line in self.snippet.splitlines(True):
+        for line in self.snippet:
             for subline in line.splitlines():
-                if next_line is not None:
-                    yield format_line(next_line)
-                next_line = subline
-
-        # combine the last line from snippet with next line
-        line = next_line + self.data.readline()
-        for subline in line.splitlines():
-            yield format_line(subline)
+                yield format_line(subline)
 
         for line in self.data.readlines():
             for subline in line.splitlines():
@@ -1301,7 +1285,7 @@ def detect_encoding(data=None):
     list of encoding types to test.
 
     Args:
-        data - list of lists
+        data - snippet of file
     Returns:
         enc - system encoding
 
@@ -1315,8 +1299,11 @@ def detect_encoding(data=None):
         enc_list.insert(0, code.lower())
     for c in enc_list:
         try:
-            data.decode(c)
-        except (UnicodeDecodeError, UnicodeError):
+            for line in data:
+                line.decode(c)
+        except (UnicodeDecodeError, UnicodeError) as e:
+            if e.reason == 'unexpected end of data':
+                return c
             continue
         return c
     print("Encoding not detected. Please pass encoding value manually")
