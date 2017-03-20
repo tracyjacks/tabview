@@ -1120,21 +1120,6 @@ class TextBox:
         self.win.refresh()
 
 
-def fix_newlines(data):
-    """If there are windows \r newlines in the input data, split the string on
-    the \r characters. I can't figure another way to enable universal newlines
-    without messing up Unicode support.
-
-    """
-    if PY2:
-        if len(data) == 1 and '\r' in data[0]:
-            data = data[0].split('\r')
-    else:
-        if len(data) == 1 and b'\r' in data[0]:
-            data = data[0].split(b'\r')
-    return data
-
-
 class DataLoader(object):
     def __init__(self, data, page=False):
         self.data = data
@@ -1263,7 +1248,6 @@ class DataLoaderStream(DataLoader):
             for subline in line.splitlines():
                 yield format_line(subline)
 
-
     def iter_rows(self):
         for row in self.csv_obj:
             if PY2:
@@ -1301,9 +1285,7 @@ def detect_encoding(data=None):
         try:
             for line in data:
                 line.decode(c)
-        except (UnicodeDecodeError, UnicodeError) as e:
-            if e.reason == 'unexpected end of data':
-                return c
+        except (UnicodeDecodeError, UnicodeError):
             continue
         return c
     print("Encoding not detected. Please pass encoding value manually")
